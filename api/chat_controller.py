@@ -1,9 +1,13 @@
+"""
+api/chat_controller.py
+"""
 import json
+import re
 from typing import Generator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, JSONResponse
-from langchain_core.messages import HumanMessage, AIMessageChunk
+from langchain_core.messages import HumanMessage, AIMessageChunk, ToolMessage
 
 from agentic_rag import build_graph
 from data_model.chat_model import MessagesRequest, ChatMessage
@@ -15,7 +19,9 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# STREAMING GENERATOR — single pass, captures sources from updates stream
+# ─────────────────────────────────────────────────────────────────────────────
+# STREAMING GENERATOR
+# ─────────────────────────────────────────────────────────────────────────────
 
 def stream_graph(payload: MessagesRequest) -> Generator[str, None, None]:
     graph = build_graph(
@@ -46,40 +52,37 @@ def stream_graph(payload: MessagesRequest) -> Generator[str, None, None]:
 
     full_response   = ""
     final_sources   = []
-    ticket_response = {}
+    seen_sources    = set()
 
     try:
-        # Single pass: stream tokens + capture sources
+        # ── Single pass: stream tokens + parse sources from tool chunks ────
         for chunk, metadata in graph.stream(
             initial_state,
             config=config,
             stream_mode="messages",
         ):
+            # Stream AI response tokens
             if isinstance(chunk, AIMessageChunk) and chunk.content:
                 token = chunk.content
                 full_response += token
                 yield json.dumps({"type": "response", "content": token}) + "\n\n"
 
-            # capture sources from state updates in metadata
-            if isinstance(metadata, dict):
-                langgraph_node = metadata.get("langgraph_node", "")
-                if langgraph_node == "assistant":
-                    state = metadata.get("__state__", {})
-                    if state.get("sources"):
-                        final_sources = state["sources"]
-                        logger.info(f"[stream_graph] sources from metadata={final_sources}")
+            # Parse [Source: ...] tags from tool message chunks
+            if isinstance(chunk, ToolMessage) and chunk.name == "doc_search_tool":
+                matches = re.findall(r'\[Source: (.+?)\]', chunk.content or "")
+                for match in matches:
+                    if match not in seen_sources:
+                        seen_sources.add(match)
+                        final_sources.append({"title": match.split("/")[-1].replace(".pdf","").replace("_"," "), "source": match})
+                        logger.info(f"[stream_graph] source found: {match}")
 
         logger.info(f"[stream_graph] final_sources={final_sources}")
 
-        # Yield sources 
+        # ── Yield sources ──────────────────────────────────────────────────
         if final_sources:
             yield json.dumps({"type": "metadata", "content": final_sources}) + "\n\n"
 
-        #  Yield ticket response 
-        if ticket_response:
-            yield json.dumps({"type": "ticket", "content": ticket_response}) + "\n\n"
-
-        # History update 
+        # ── History update ─────────────────────────────────────────────────
         updated_history = payload.chat_history + [
             ChatMessage(role="user",      content=payload.message),
             ChatMessage(role="assistant", content=full_response),
@@ -93,11 +96,11 @@ def stream_graph(payload: MessagesRequest) -> Generator[str, None, None]:
         yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
 # ROUTES
 
 @router.get("/messages")
 async def get_messages():
-    """Endpoint to retrieve all messages."""
     return JSONResponse(content={"messages": []})
 
 
