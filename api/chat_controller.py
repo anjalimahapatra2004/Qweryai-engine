@@ -1,9 +1,6 @@
-"""
-api/chat_controller.py
-"""
 import json
 import re
-from typing import Generator
+from typing import AsyncGenerator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -19,15 +16,18 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STREAMING GENERATOR
-# ─────────────────────────────────────────────────────────────────────────────
+# STREAMING GENERATOR — fully async, works with uvicorn event loop
 
-def stream_graph(payload: MessagesRequest) -> Generator[str, None, None]:
-    graph = build_graph(
+async def stream_graph(payload: MessagesRequest) -> AsyncGenerator[str, None]:
+    zoho_email = payload.zoho_email or payload.customer_id
+
+    # await build_graph (async now) 
+    graph = await build_graph(
         customer_id=payload.customer_id,
         firstname=payload.firstname,
         lastname=payload.lastname,
+        access_token=payload.access_token,
+        zoho_email=zoho_email,
     )
 
     message_history = build_message_history(payload.chat_history)
@@ -38,57 +38,59 @@ def stream_graph(payload: MessagesRequest) -> Generator[str, None, None]:
         "customer_id":     payload.customer_id,
         "firstname":       payload.firstname,
         "lastname":        payload.lastname,
+        "access_token":    payload.access_token,
+        "zoho_email":      zoho_email,
         "sources":         [],
         "ticket_response": {},
     }
 
     config = {
         "configurable": {
-            "customer_id": payload.customer_id,
-            "firstname":   payload.firstname,
-            "lastname":    payload.lastname,
+            "customer_id":  payload.customer_id,
+            "firstname":    payload.firstname,
+            "lastname":     payload.lastname,
+            "access_token": payload.access_token,
+            "zoho_email":   zoho_email,
         }
     }
 
-    full_response   = ""
-    final_sources   = []
-    seen_sources    = set()
+    full_response = ""
+    final_sources = []
+    seen_sources  = set()
 
     try:
-        # ── Single pass: stream tokens + parse sources from tool chunks ────
-        for chunk, metadata in graph.stream(
+        async for chunk, metadata in graph.astream(
             initial_state,
             config=config,
             stream_mode="messages",
         ):
-            # Stream AI response tokens
+            # Stream AI tokens
             if isinstance(chunk, AIMessageChunk) and chunk.content:
                 token = chunk.content
                 full_response += token
                 yield json.dumps({"type": "response", "content": token}) + "\n\n"
 
-            # Parse [Source: ...] tags from tool message chunks
+            # Parse source links from doc_search_tool output
             if isinstance(chunk, ToolMessage) and chunk.name == "doc_search_tool":
                 matches = re.findall(r'\[Source: (.+?)\]', chunk.content or "")
                 for match in matches:
                     if match not in seen_sources:
                         seen_sources.add(match)
-                        final_sources.append({"title": match.split("/")[-1].replace(".pdf","").replace("_"," "), "source": match})
-                        logger.info(f"[stream_graph] source found: {match}")
+                        final_sources.append({
+                            "title":  match.split("/")[-1].replace(".pdf","").replace("_"," "),
+                            "source": match,
+                        })
 
         logger.info(f"[stream_graph] final_sources={final_sources}")
 
-        # ── Yield sources ──────────────────────────────────────────────────
         if final_sources:
             yield json.dumps({"type": "metadata", "content": final_sources}) + "\n\n"
 
-        # ── History update ─────────────────────────────────────────────────
         updated_history = payload.chat_history + [
             ChatMessage(role="user",      content=payload.message),
             ChatMessage(role="assistant", content=full_response),
         ]
         yield json.dumps({"type": "history_update", "content": [m.model_dump() for m in updated_history]}) + "\n\n"
-
         yield json.dumps({"type": "done", "content": ""}) + "\n\n"
 
     except Exception as e:
@@ -96,7 +98,6 @@ def stream_graph(payload: MessagesRequest) -> Generator[str, None, None]:
         yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # ROUTES
 
 @router.get("/messages")

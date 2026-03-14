@@ -27,3 +27,29 @@ PGVECTOR_COLLECTION = os.getenv("PGVECTOR_COLLECTION", "documents")
 MONGODB_URI         = os.getenv("MONGODB_URI",         "mongodb://localhost:27017")
 MONGODB_DB          = os.getenv("MONGODB_DB",          "qweryai")
 MONGODB_COLLECTION  = os.getenv("MONGODB_COLLECTION",  "document")
+
+
+# Zoho (India region) 
+ZOHO_CLIENT_ID     = os.getenv("ZOHO_CLIENT_ID",     "")
+ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET", "")
+ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN", "")
+ZOHO_ACCESS_TOKEN  = os.getenv("ZOHO_ACCESS_TOKEN",  "")
+ZOHO_REDIRECT_URI  = os.getenv("ZOHO_REDIRECT_URI",  "https://www.zoho.com/people")
+ZOHO_TOKEN_URL     = os.getenv("ZOHO_TOKEN_URL",     "https://accounts.zoho.in/oauth/v2/token")
+ZOHO_BASE_URL      = os.getenv("ZOHO_BASE_URL",      "https://people.zoho.in")
+ALLOWED_DOMAIN     = os.getenv("ALLOWED_DOMAIN",     "prodevans.com")
+ 
+# MCP Server 
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001/sse")
+ 
+# FastAPI
+APP_HOST    = os.getenv("APP_HOST",    "0.0.0.0")
+APP_PORT    = int(os.getenv("APP_PORT", "8002"))
+FASTAPI_URL = os.getenv("FASTAPI_URL", "http://localhost:8002")
+
+
+# Settings object 
+class _Settings:
+    zoho_base_url = ZOHO_BASE_URL
+ 
+settings = _Settings()

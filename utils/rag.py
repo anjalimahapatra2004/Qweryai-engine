@@ -12,7 +12,11 @@ logger = get_logger(__name__)
 
 def _get_embeddings():
     logger.info(f"[RAG] Loading embedding model: {EMBED_MODEL}")
-    return HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+    return HuggingFaceEmbeddings(
+        model_name=EMBED_MODEL,
+        model_kwargs={"local_files_only": True},   
+    )
+
 
 # PGVECTOR
 
@@ -35,7 +39,7 @@ def _build_mongodb_retriever():
     from langchain_mongodb import MongoDBAtlasVectorSearch
     from pymongo import MongoClient
 
-    logger.info("[RAG] Connecting to MongoDB")
+    logger.info("[RAG] Connecting to MongoDB...")
     client      = MongoClient(MONGODB_URI)
     collection  = client[MONGODB_DB][MONGODB_COLLECTION]
     vectorstore = MongoDBAtlasVectorSearch(
