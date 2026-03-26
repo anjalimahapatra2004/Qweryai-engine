@@ -12,21 +12,17 @@ from utils.helpers import build_message_history
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
 router = APIRouter()
 
-
-# STREAMING GENERATOR — fully async, works with uvicorn event loop
 
 async def stream_graph(payload: MessagesRequest) -> AsyncGenerator[str, None]:
     zoho_email = payload.zoho_email or payload.customer_id
 
-    # await build_graph (async now) 
+    # No token needed — MCP server fetches from DB by email 
     graph = await build_graph(
         customer_id=payload.customer_id,
         firstname=payload.firstname,
         lastname=payload.lastname,
-        access_token=payload.access_token,
         zoho_email=zoho_email,
     )
 
@@ -38,7 +34,6 @@ async def stream_graph(payload: MessagesRequest) -> AsyncGenerator[str, None]:
         "customer_id":     payload.customer_id,
         "firstname":       payload.firstname,
         "lastname":        payload.lastname,
-        "access_token":    payload.access_token,
         "zoho_email":      zoho_email,
         "sources":         [],
         "ticket_response": {},
@@ -46,11 +41,10 @@ async def stream_graph(payload: MessagesRequest) -> AsyncGenerator[str, None]:
 
     config = {
         "configurable": {
-            "customer_id":  payload.customer_id,
-            "firstname":    payload.firstname,
-            "lastname":     payload.lastname,
-            "access_token": payload.access_token,
-            "zoho_email":   zoho_email,
+            "customer_id": payload.customer_id,
+            "firstname":   payload.firstname,
+            "lastname":    payload.lastname,
+            "zoho_email":  zoho_email,
         }
     }
 
@@ -60,28 +54,21 @@ async def stream_graph(payload: MessagesRequest) -> AsyncGenerator[str, None]:
 
     try:
         async for chunk, metadata in graph.astream(
-            initial_state,
-            config=config,
-            stream_mode="messages",
+            initial_state, config=config, stream_mode="messages",
         ):
-            # Stream AI tokens
             if isinstance(chunk, AIMessageChunk) and chunk.content:
                 token = chunk.content
                 full_response += token
                 yield json.dumps({"type": "response", "content": token}) + "\n\n"
 
-            # Parse source links from doc_search_tool output
             if isinstance(chunk, ToolMessage) and chunk.name == "doc_search_tool":
-                matches = re.findall(r'\[Source: (.+?)\]', chunk.content or "")
-                for match in matches:
+                for match in re.findall(r'\[Source: (.+?)\]', chunk.content or ""):
                     if match not in seen_sources:
                         seen_sources.add(match)
                         final_sources.append({
-                            "title":  match.split("/")[-1].replace(".pdf","").replace("_"," "),
+                            "title":  match.split("/")[-1].replace(".pdf", "").replace("_", " "),
                             "source": match,
                         })
-
-        logger.info(f"[stream_graph] final_sources={final_sources}")
 
         if final_sources:
             yield json.dumps({"type": "metadata", "content": final_sources}) + "\n\n"
@@ -95,10 +82,12 @@ async def stream_graph(payload: MessagesRequest) -> AsyncGenerator[str, None]:
 
     except Exception as e:
         logger.error(f"[stream_graph] Error: {e}")
-        yield json.dumps({"type": "error", "content": str(e)}) + "\n\n"
 
+        yield json.dumps({
+            "type": "error",
+            "content": "⚠️ Unable to fetch your profile. Please try again."
+        }) + "\n\n"    
 
-# ROUTES
 
 @router.get("/messages")
 async def get_messages():

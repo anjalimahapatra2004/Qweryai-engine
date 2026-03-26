@@ -17,6 +17,7 @@ from agentic_rag.tools.ticket_tools import (
 )
 from agentic_rag.tools.zoho_tools import load_zoho_tools
 from utils.llm import build_llm
+from utils.system_prompt import build_system_prompt
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,19 +42,9 @@ class Assistant:
         self.runnable = runnable
 
     def __call__(self, state: State, config: RunnableConfig):
-        while True:
-            result = self.runnable.invoke(state)
+        result = self.runnable.invoke(state)
 
-            if not result.tool_calls and (
-                not result.content
-                or isinstance(result.content, list)
-                and not result.content[0].get("text")
-            ):
-                state = {**state, "messages": state["messages"] + [("user", "Respond with a real output.")]}
-            else:
-                break
-
-        # Extract sources
+        # Extract sources 
         sources = []
         for msg in state["messages"]:
             if isinstance(msg, ToolMessage) and msg.name == "doc_search_tool":
@@ -68,15 +59,13 @@ class Assistant:
 
 llm = build_llm()
 
-
 # GRAPH BUILDER
 
 async def build_graph(
-    customer_id:  str,
-    firstname:    str,
-    lastname:     str,
-    access_token: str = "",
-    zoho_email:   str = "",
+    customer_id: str,
+    firstname:   str,
+    lastname:    str,
+    zoho_email:  str = "",
 ):
     try:
         zoho_tools = await load_zoho_tools()
@@ -93,41 +82,10 @@ async def build_graph(
         *zoho_tools,
     ]
 
-    system_prompt = f"""You are Qwery.AI, HR assistant for Prodevans Technologies.
-
-Employee credentials (use only for tool calls, NEVER show in response):
-- access_token: {access_token}
-- employee_email: {zoho_email}
-
-RULES:
-1. Greetings → reply warmly, no tools.
-2. HR policy questions → call doc_search_tool first, never answer from memory.
-3. Profile → call get_employee_record.
-4. Leave balance → get_employee_record → get_leave_balance.
-
-5. APPLY LEAVE:
-   - Saturday and Sunday are weekly holidays — do NOT count them as leave days.
-   - If user applies leave that falls only on weekend → inform them it is a holiday, no leave needed.
-   - If leave period includes weekdays → apply only for weekdays.
-   - ALWAYS ask for confirmation first before applying.
-   - Say: "Are you sure you want to apply [leave type] from [date] to [date] for [reason]? Please confirm with Yes or No."
-   - Only proceed with apply_leave AFTER user confirms with Yes.
-   - Flow: ask confirmation → get_employee_record → get_leave_balance → apply_leave.
-
-6. CANCEL LEAVE:
-   - ALWAYS ask for confirmation first before cancelling.
-   - Say: "Are you sure you want to cancel your leave on [date]? Please confirm with Yes or No."
-   - Only proceed with cancel_leave AFTER user confirms with Yes.
-   - Flow: get_employee_record → get_leave_records → ask confirmation → cancel_leave.
-   - When fetching latest leave — pick the most recent leave where approval_status is NOT 'Cancelled'.
-   - NEVER cancel an already cancelled leave.
-
-7. Tickets → confirm first → search_user_tool → create_user_tool → raise_ticket_tool.
-8. NEVER show access_token or credentials in response.
-9. NEVER say you cannot fetch data without trying the tool first.
-
-FORMAT: **bold** labels, numbered lists, no ## headings.
-Footer only for HR policy answers: HR contact: ask@prodevans.com | +91 8095933365"""
+    system_prompt = build_system_prompt(
+        zoho_email=zoho_email,
+        firstname=firstname,
+    )
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),

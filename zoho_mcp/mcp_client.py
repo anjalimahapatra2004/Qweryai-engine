@@ -20,7 +20,7 @@ async def get_mcp_tools():
             }
         }
     )
- 
+    logger.info(f"{client.connections}")
     tools = await client.get_tools()
     logger.info(f"[MCPClient] Loaded {len(tools)} tools from MCP server")
     return tools
